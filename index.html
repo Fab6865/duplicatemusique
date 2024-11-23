@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Détecteur de Doublons Musicaux</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f0f2f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1a73e8;
+            text-align: center;
+        }
+        .upload-zone {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        .upload-zone.dragover {
+            border-color: #1a73e8;
+            background-color: #f8f9fa;
+        }
+        button {
+            background-color: #1a73e8;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        button:hover {
+            background-color: #1557b0;
+        }
+        .duplicate-group {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+        }
+        .delete-btn {
+            background-color: #dc3545;
+            padding: 5px 10px;
+            font-size: 0.9em;
+        }
+        .delete-btn:hover {
+            background-color: #c82333;
+        }
+        .original-label {
+            color: #28a745;
+            font-size: 0.9em;
+        }
+        #loading {
+            text-align: center;
+            display: none;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #1a73e8;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Détecteur de Doublons Musicaux</h1>
+        
+        <div class="upload-zone" id="dropZone">
+            <p>Glissez-déposez vos fichiers musicaux ici</p>
+            <p>ou</p>
+            <input type="file" id="fileInput" multiple accept=".mp3,.wav,.flac,.m4a,.ogg" style="display: none;">
+            <button onclick="document.getElementById('fileInput').click()">Sélectionner des fichiers</button>
+        </div>
+
+        <div id="loading">
+            <div class="spinner"></div>
+            <p>Analyse des fichiers en cours...</p>
+        </div>
+
+        <div id="results"></div>
+    </div>
+
+    <script>
+        class AudioFile {
+            constructor(file) {
+                this.file = file;
+                this.size = file.size;
+                this.name = file.name;
+            }
+
+            async calculateHash() {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const wordArray = CryptoJS.lib.WordArray.create(e.target.result);
+                        const hash = CryptoJS.MD5(wordArray).toString();
+                        resolve(hash);
+                    };
+                    reader.readAsArrayBuffer(this.file);
+                });
+            }
+        }
+
+        class DuplicateFinder {
+            constructor() {
+                this.files = new Map(); // hash -> [files]
+                this.setupEventListeners();
+            }
+
+            setupEventListeners() {
+                const dropZone = document.getElementById('dropZone');
+                
+                dropZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    dropZone.classList.add('dragover');
+                });
+
+                dropZone.addEventListener('dragleave', () => {
+                    dropZone.classList.remove('dragover');
+                });
+
+                dropZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    dropZone.classList.remove('dragover');
+                    const files = Array.from(e.dataTransfer.files);
+                    this.processFiles(files);
+                });
+
+                document.getElementById('fileInput').addEventListener('change', (e) => {
+                    const files = Array.from(e.target.files);
+                    this.processFiles(files);
+                });
+            }
+
+            async processFiles(fileList) {
+                const loading = document.getElementById('loading');
+                loading.style.display = 'block';
+                
+                const audioFiles = fileList.filter(file => 
+                    /\.(mp3|wav|flac|m4a|ogg)$/i.test(file.name)
+                ).map(file => new AudioFile(file));
+
+                for (const audioFile of audioFiles) {
+                    const hash = await audioFile.calculateHash();
+                    if (!this.files.has(hash)) {
+                        this.files.set(hash, []);
+                    }
+                    this.files.get(hash).push(audioFile);
+                }
+
+                this.displayResults();
+                loading.style.display = 'none';
+            }
+
+            displayResults() {
+                const resultsDiv = document.getElementById('results');
+                resultsDiv.innerHTML = '';
+
+                let duplicatesFound = false;
+
+                this.files.forEach((files, hash) => {
+                    if (files.length > 1) {
+                        duplicatesFound = true;
+                        const groupDiv = document.createElement('div');
+                        groupDiv.className = 'duplicate-group';
+                        
+                        const headerDiv = document.createElement('div');
+                        headerDiv.innerHTML = `<h3>Groupe de fichiers identiques (${files.length} fichiers)</h3>`;
+                        groupDiv.appendChild(headerDiv);
+
+                        files.forEach((file, index) => {
+                            const fileDiv = document.createElement('div');
+                            fileDiv.className = 'file-item';
+                            
+                            const nameSpan = document.createElement('span');
+                            nameSpan.textContent = file.name;
+                            fileDiv.appendChild(nameSpan);
+
+                            if (index === 0) {
+                                const originalLabel = document.createElement('span');
+                                originalLabel.className = 'original-label';
+                                originalLabel.textContent = '(Original)';
+                                fileDiv.appendChild(originalLabel);
+                            } else {
+                                const deleteButton = document.createElement('button');
+                                deleteButton.className = 'delete-btn';
+                                deleteButton.textContent = 'Supprimer';
+                                deleteButton.onclick = () => this.removeFile(hash, index);
+                                fileDiv.appendChild(deleteButton);
+                            }
+
+                            groupDiv.appendChild(fileDiv);
+                        });
+
+                        resultsDiv.appendChild(groupDiv);
+                    }
+                });
+
+                if (!duplicatesFound) {
+                    resultsDiv.innerHTML = '<p>Aucun doublon trouvé.</p>';
+                }
+            }
+
+            removeFile(hash, index) {
+                const files = this.files.get(hash);
+                files.splice(index, 1);
+                if (files.length === 1) {
+                    this.files.delete(hash);
+                }
+                this.displayResults();
+            }
+        }
+
+        // Charger CryptoJS
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js';
+        script.onload = () => {
+            window.duplicateFinder = new DuplicateFinder();
+        };
+        document.head.appendChild(script);
+    </script>
+</body>
+</html>
